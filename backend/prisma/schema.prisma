@@ -1,0 +1,957 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ----------------------------------------------------------------------------
+// 1. ORGANIZATIONAL HIERARCHY & GEOGRAPHY MASTER DATA (MODULE 0)
+// ----------------------------------------------------------------------------
+
+model Company {
+  id           String        @id @default(uuid())
+  code         String        @unique
+  name         String
+  address      String?
+  phone        String?
+  email        String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  headquarters Headquarter[]
+  zones        Zone[]
+  departments  Department[]
+
+  @@map("companies")
+}
+
+model Headquarter {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  location  String?
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("headquarters")
+}
+
+model Zone {
+  id        String    @id @default(uuid())
+  code      String    @unique
+  name      String
+  companyId String
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  regions   Region[]
+  branches  Branch[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  users     User[]
+
+  @@map("zones")
+}
+
+model Region {
+  id        String    @id @default(uuid())
+  code      String    @unique
+  name      String
+  zoneId    String
+  zone      Zone      @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  branches  Branch[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  users     User[]
+
+  @@map("regions")
+}
+
+model Branch {
+  id                String             @id @default(uuid())
+  code              String             @unique
+  name              String
+  type              BranchType         @default(URBAN)
+  zoneId            String
+  zone              Zone               @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  regionId          String?
+  region            Region?            @relation(fields: [regionId], references: [id], onDelete: SetNull)
+  address           String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  users             User[]
+  fromTransfers     TransferProposal[] @relation("FromBranch")
+  toTransfers       TransferProposal[] @relation("ToBranch")
+  deployments       DeploymentRecord[]
+  manpowerRequisitions ManpowerRequisition[]
+
+  @@map("branches")
+}
+
+enum BranchType {
+  RURAL
+  URBAN
+  ZONE_OFFICE
+  HEAD_OFFICE
+}
+
+model Department {
+  id                String             @id @default(uuid())
+  code              String             @unique
+  name              String
+  companyId         String
+  company           Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  designations      Designation[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  users             User[]
+  fromTransfers     TransferProposal[] @relation("FromDepartment")
+  toTransfers       TransferProposal[] @relation("ToDepartment")
+  jobCirculars      JobCircular[]
+  deployments       DeploymentRecord[]
+  manpowerRequisitions ManpowerRequisition[]
+
+  @@map("departments")
+}
+
+model Designation {
+  id                String             @id @default(uuid())
+  code              String             @unique
+  title             String
+  departmentId      String
+  department        Department         @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  jobGradeId        String?
+  jobGrade          JobGrade?          @relation(fields: [jobGradeId], references: [id], onDelete: SetNull)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  users             User[]
+  fromTransfers     TransferProposal[] @relation("FromDesignation")
+  toTransfers       TransferProposal[] @relation("ToDesignation")
+  fromPromotions    PromotionRecord[]  @relation("FromDesignation")
+  toPromotions      PromotionRecord[]  @relation("ToDesignation")
+  jobCirculars      JobCircular[]
+  deployments       DeploymentRecord[]
+  manpowerRequisitions ManpowerRequisition[]
+
+  @@map("designations")
+}
+
+model JobGrade {
+  id             String            @id @default(uuid())
+  gradeCode      String            @unique
+  level          Int
+  minSalary      Decimal           @default(0.00) @db.Decimal(12, 2)
+  maxSalary      Decimal           @default(0.00) @db.Decimal(12, 2)
+  designations   Designation[]
+  payScales      PayScale[]
+  fromPromotions PromotionRecord[] @relation("FromGrade")
+  toPromotions   PromotionRecord[] @relation("ToGrade")
+  jobCirculars   JobCircular[]
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@map("job_grades")
+}
+
+// ----------------------------------------------------------------------------
+// 2. USER, RBAC & IDENTITY (MODULE 0)
+// ----------------------------------------------------------------------------
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  TERMINATED
+}
+
+model User {
+  id                 String       @id @default(uuid())
+  employeeId         String       @unique
+  email              String       @unique
+  passwordHash       String
+  firstName          String
+  lastName           String
+  phone              String?
+  status             UserStatus   @default(ACTIVE)
+
+  zoneId             String?
+  zone               Zone?        @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  regionId           String?
+  region             Region?      @relation(fields: [regionId], references: [id], onDelete: SetNull)
+  branchId           String?
+  branch             Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  departmentId       String?
+  department         Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  designationId      String?
+  designation        Designation? @relation(fields: [designationId], references: [id], onDelete: SetNull)
+
+  reportingManagerId String?
+  reportingManager   User?        @relation("ManagerSubordinates", fields: [reportingManagerId], references: [id], onDelete: SetNull)
+  subordinates       User[]       @relation("ManagerSubordinates")
+
+  userRoles          UserRole[]
+  dataScopes         DataScope[]
+  auditLogs          AuditLog[]
+  approvalLogs       ApprovalLog[]
+  initiatedWorkflows ApprovalInstance[] @relation("InitiatorWorkflow")
+
+  profile            EmployeeProfile?
+  attendances        DailyAttendance[]
+  payFixations       PayFixation[]
+  promotions         PromotionRecord[]
+  increments         IncrementRecord[]
+  transfers          TransferProposal[]
+  leaveBalances      LeaveBalance[]
+  leaveApplications  LeaveApplication[]
+
+  vivaBoardMembers   VivaBoardMember[]
+  vivaScores         VivaScore[]
+  deployedRecord     DeploymentRecord?   @relation("DeployedEmployee")
+  initiatedRequisitions ManpowerRequisition[] @relation("InitiatedRequisitions")
+  approvedRequisitions  ManpowerRequisition[] @relation("ApprovedRequisitions")
+
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@map("users")
+}
+
+model Role {
+  id          String           @id @default(uuid())
+  code        String           @unique
+  name        String
+  description String?
+  userRoles   UserRole[]
+  permissions RolePermission[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String           @id @default(uuid())
+  module      String
+  action      String
+  code        String           @unique
+  description String?
+  roles       RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  userId     String
+  roleId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  assignedAt DateTime @default(now())
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+enum ScopeType {
+  GLOBAL
+  HEADQUARTER
+  ZONE
+  REGION
+  BRANCH
+  DEPARTMENT
+}
+
+model DataScope {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scopeType ScopeType @default(BRANCH)
+  targetId  String?
+  createdAt DateTime  @default(now())
+
+  @@map("data_scopes")
+}
+
+// ----------------------------------------------------------------------------
+// 3. GENERIC DYNAMIC APPROVAL WORKFLOW ENGINE (MODULE 0)
+// ----------------------------------------------------------------------------
+
+enum ApproverType {
+  REPORTING_MANAGER
+  DEPARTMENT_HEAD
+  ROLE
+  SPECIFIC_USER
+  ZONAL_MANAGER
+  REGIONAL_MANAGER
+  DIRECTOR
+}
+
+enum WorkflowStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  SENT_BACK
+  CANCELLED
+}
+
+enum WorkflowAction {
+  SUBMIT
+  APPROVE
+  REJECT
+  SEND_BACK
+  CANCEL
+}
+
+model ApprovalWorkflowConfig {
+  id          String                 @id @default(uuid())
+  module      String
+  name        String
+  description String?
+  isActive    Boolean                @default(true)
+  steps       ApprovalWorkflowStep[]
+  instances   ApprovalInstance[]
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+
+  @@map("approval_workflow_configs")
+}
+
+model ApprovalWorkflowStep {
+  id               String                 @id @default(uuid())
+  workflowConfigId String
+  workflowConfig   ApprovalWorkflowConfig @relation(fields: [workflowConfigId], references: [id], onDelete: Cascade)
+  stepOrder        Int
+  stepName         String
+  approverType     ApproverType           @default(REPORTING_MANAGER)
+  roleCode         String?
+  conditionJson    Json?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@unique([workflowConfigId, stepOrder])
+  @@map("approval_workflow_steps")
+}
+
+model ApprovalInstance {
+  id               String                 @id @default(uuid())
+  workflowConfigId String
+  workflowConfig   ApprovalWorkflowConfig @relation(fields: [workflowConfigId], references: [id])
+  entityType       String
+  entityId         String
+  currentStepOrder Int                    @default(1)
+  status           WorkflowStatus         @default(PENDING)
+  initiatorId      String
+  initiator        User                   @relation("InitiatorWorkflow", fields: [initiatorId], references: [id], onDelete: Cascade)
+  logs             ApprovalLog[]
+  transferProposal TransferProposal?
+  leaveApplication LeaveApplication?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@map("approval_instances")
+}
+
+model ApprovalLog {
+  id                 String           @id @default(uuid())
+  approvalInstanceId String
+  approvalInstance   ApprovalInstance @relation(fields: [approvalInstanceId], references: [id], onDelete: Cascade)
+  stepNumber         Int
+  action             WorkflowAction
+  actorId            String
+  actor              User             @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  remarks            String?
+  timestamp          DateTime         @default(now())
+
+  @@map("approval_logs")
+}
+
+// ----------------------------------------------------------------------------
+// 4. AUDIT & COMPLIANCE LOGS (MODULE 0)
+// ----------------------------------------------------------------------------
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  WORKFLOW_TRANSITION
+}
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  actorId    String?
+  actor      User?       @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  entityName String
+  entityId   String?
+  action     AuditAction
+  oldValues  Json?
+  newValues  Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime    @default(now())
+
+  @@index([entityName, entityId])
+  @@index([actorId])
+  @@map("audit_logs")
+}
+
+// ----------------------------------------------------------------------------
+// 5. MODULE 1: ADMINISTRATION, SUCCESSION, TRANSFER & LEAVE
+// ----------------------------------------------------------------------------
+
+enum EmploymentType {
+  REGULAR
+  PROBATIONARY
+  CONTRACTUAL
+  DEPUTATION
+  INTERN
+}
+
+enum ConfirmationStatus {
+  PROBATION
+  CONFIRMED
+  EXTENDED_PROBATION
+}
+
+model EmployeeProfile {
+  id                 String             @id @default(uuid())
+  userId             String             @unique
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fatherName         String?
+  motherName         String?
+  dateOfBirth        DateTime
+  gender             String
+  bloodGroup         String?
+  nidNumber          String?            @unique
+  tinNumber          String?
+  joiningDate        DateTime
+  confirmationStatus ConfirmationStatus @default(PROBATION)
+  confirmationDate   DateTime?
+  probationMonths    Int                @default(6)
+  employmentType     EmploymentType     @default(PROBATIONARY)
+  currentBasicSalary Decimal            @default(0.00) @db.Decimal(12, 2)
+  emergencyContact   String?
+  emergencyPhone     String?
+  bankName           String?
+  bankAccountNumber  String?
+  routingNumber      String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@map("employee_profiles")
+}
+
+model WorkShift {
+  id               String            @id @default(uuid())
+  code             String            @unique
+  name             String
+  startTime        String
+  endTime          String
+  lateGraceMinutes Int               @default(15)
+  isActive         Boolean           @default(true)
+  attendances      DailyAttendance[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@map("work_shifts")
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  HALF_DAY
+  ON_LEAVE
+  WEEKEND
+  HOLIDAY
+}
+
+model DailyAttendance {
+  id            String           @id @default(uuid())
+  userId        String
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date          DateTime         @db.Date
+  inTime        DateTime?
+  outTime       DateTime?
+  shiftId       String?
+  shift         WorkShift?       @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  status        AttendanceStatus @default(PRESENT)
+  anomalyReason String?
+  isRegularized Boolean          @default(false)
+  regularizedBy String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@unique([userId, date])
+  @@map("daily_attendances")
+}
+
+model PayScale {
+  id            String        @id @default(uuid())
+  scaleName     String        @unique
+  jobGradeId    String
+  jobGrade      JobGrade      @relation(fields: [jobGradeId], references: [id], onDelete: Cascade)
+  basicMinimum  Decimal       @db.Decimal(12, 2)
+  basicMaximum  Decimal       @db.Decimal(12, 2)
+  incrementStep Decimal       @db.Decimal(12, 2)
+  fixations     PayFixation[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@map("pay_scales")
+}
+
+model PayFixation {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payScaleId     String
+  payScale       PayScale  @relation(fields: [payScaleId], references: [id])
+  effectiveDate  DateTime
+  oldBasicSalary Decimal   @db.Decimal(12, 2)
+  newBasicSalary Decimal   @db.Decimal(12, 2)
+  fixationReason String
+  approvedBy     String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@map("pay_fixations")
+}
+
+enum TransitionType {
+  RURAL_TO_URBAN
+  URBAN_TO_RURAL
+  FIELD_TO_HQ
+  HQ_TO_FIELD
+  ZONE_TO_ZONE
+  NORMAL
+}
+
+model PromotionRecord {
+  id                String         @id @default(uuid())
+  userId            String
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fromDesignationId String
+  fromDesignation   Designation    @relation("FromDesignation", fields: [fromDesignationId], references: [id])
+  toDesignationId   String
+  toDesignation     Designation    @relation("ToDesignation", fields: [toDesignationId], references: [id])
+  fromGradeId       String
+  fromGrade         JobGrade       @relation("FromGrade", fields: [fromGradeId], references: [id])
+  toGradeId         String
+  toGrade           JobGrade       @relation("ToGrade", fields: [toGradeId], references: [id])
+  transitionType    TransitionType @default(NORMAL)
+  effectiveDate     DateTime
+  checklistVerified Boolean        @default(false)
+  checklistData     Json?
+  remarks           String?
+  status            WorkflowStatus @default(PENDING)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@map("promotion_records")
+}
+
+enum IncrementType {
+  ANNUAL
+  SPECIAL
+  PERFORMANCE
+  STAGNATION
+}
+
+model IncrementRecord {
+  id              String         @id @default(uuid())
+  userId          String
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  effectiveDate   DateTime
+  incrementType   IncrementType  @default(ANNUAL)
+  oldBasicSalary  Decimal        @db.Decimal(12, 2)
+  incrementAmount Decimal        @db.Decimal(12, 2)
+  newBasicSalary  Decimal        @db.Decimal(12, 2)
+  checklistPassed Boolean        @default(true)
+  checklistData   Json?
+  status          WorkflowStatus @default(APPROVED)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@map("increment_records")
+}
+
+model TransferProposal {
+  id                  String            @id @default(uuid())
+  proposalNo          String            @unique
+  userId              String
+  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fromBranchId        String
+  fromBranch          Branch            @relation("FromBranch", fields: [fromBranchId], references: [id])
+  toBranchId          String
+  toBranch            Branch            @relation("ToBranch", fields: [toBranchId], references: [id])
+  fromDepartmentId    String
+  fromDepartment      Department        @relation("FromDepartment", fields: [fromDepartmentId], references: [id])
+  toDepartmentId      String
+  toDepartment        Department        @relation("ToDepartment", fields: [toDepartmentId], references: [id])
+  fromDesignationId   String
+  fromDesignation     Designation       @relation("FromDesignation", fields: [fromDesignationId], references: [id])
+  toDesignationId     String
+  toDesignation       Designation       @relation("ToDesignation", fields: [toDesignationId], references: [id])
+  transitionType      TransitionType    @default(RURAL_TO_URBAN)
+  effectiveDate       DateTime
+  reason              String
+  checklistPassed     Boolean           @default(false)
+  checklistData       Json?
+  letterGenerated     Boolean           @default(false)
+  letterContentBangla String?           @db.Text
+  approvalInstanceId  String?           @unique
+  approvalInstance    ApprovalInstance? @relation(fields: [approvalInstanceId], references: [id])
+  status              WorkflowStatus    @default(PENDING)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  @@map("transfer_proposals")
+}
+
+model LeavePolicy {
+  id                String             @id @default(uuid())
+  leaveTypeCode     String             @unique
+  name              String
+  yearlyDays        Int
+  canCarryForward   Boolean            @default(false)
+  maxCarryForward   Int                @default(0)
+  genderRestriction String?
+  minServiceDays    Int                @default(0)
+  isActive          Boolean            @default(true)
+  balances          LeaveBalance[]
+  applications      LeaveApplication[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@map("leave_policies")
+}
+
+model LeaveBalance {
+  id            String      @id @default(uuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  policyId      String
+  policy        LeavePolicy @relation(fields: [policyId], references: [id])
+  year          Int
+  allocatedDays Decimal     @db.Decimal(5, 1)
+  availedDays   Decimal     @default(0.0) @db.Decimal(5, 1)
+  remainingDays Decimal     @db.Decimal(5, 1)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([userId, policyId, year])
+  @@map("leave_balances")
+}
+
+model LeaveApplication {
+  id                 String            @id @default(uuid())
+  applicationNo      String            @unique
+  userId             String
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  policyId           String
+  policy             LeavePolicy       @relation(fields: [policyId], references: [id])
+  startDate          DateTime          @db.Date
+  endDate            DateTime          @db.Date
+  totalDays          Decimal           @db.Decimal(5, 1)
+  reason             String
+  emergencyContact   String?
+  emergencyAddress   String?
+  approvalInstanceId String?           @unique
+  approvalInstance   ApprovalInstance? @relation(fields: [approvalInstanceId], references: [id])
+  status             WorkflowStatus    @default(PENDING)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@map("leave_applications")
+}
+
+// ============================================================================
+// MODULE 7: RECRUITMENT, CANDIDATE LOGISTICS, EXAMINATIONS & VIVA
+// ============================================================================
+
+enum CircularStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+  ARCHIVED
+}
+
+model JobCircular {
+  id                  String             @id @default(uuid())
+  circularNo          String             @unique // e.g. CIR-2026-001
+  title               String
+  departmentId        String
+  department          Department         @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  designationId       String
+  designation         Designation        @relation(fields: [designationId], references: [id], onDelete: Cascade)
+  jobGradeId          String
+  jobGrade            JobGrade           @relation(fields: [jobGradeId], references: [id], onDelete: Cascade)
+  vacanciesCount      Int                @default(1)
+  applicationDeadline DateTime
+  requirements        String             @db.Text
+  minExperienceYears  Int                @default(0)
+  minCgpa             Decimal            @default(2.50) @db.Decimal(3, 2)
+  minDegree           String             @default("Bachelor")
+  maxAge              Int                @default(32)
+  status              CircularStatus     @default(PUBLISHED)
+  requisitionId       String?
+  requisition         ManpowerRequisition? @relation(fields: [requisitionId], references: [id], onDelete: SetNull)
+  candidates          Candidate[]
+  examSchedules       ExamSchedule[]
+  vivaBoards          VivaBoard[]
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@map("job_circulars")
+}
+
+enum CandidateStatus {
+  APPLIED
+  VERIFIED
+  SHORTLISTED
+  EXAM_SCHEDULED
+  WRITTEN_PASSED
+  VIVA_SCHEDULED
+  SELECTED
+  DEPLOYED
+  REJECTED
+}
+
+model Candidate {
+  id              String                  @id @default(uuid())
+  trackingId      String                  @unique // e.g. CAN-2026-00041
+  circularId      String
+  circular        JobCircular             @relation(fields: [circularId], references: [id], onDelete: Cascade)
+  fullName        String
+  email           String
+  phone           String
+  nidNumber       String?
+  dateOfBirth     DateTime
+  gender          String                  // MALE, FEMALE, OTHER
+  district        String                  // e.g. Dhaka, Bogura, Chittagong
+  highestDegree   String                  // e.g. Bachelor, Master
+  institution     String?
+  cgpa            Decimal                 @db.Decimal(3, 2)
+  experienceYears Int                     @default(0)
+  photoUrl        String?
+  resumeUrl       String?
+  guarantorName   String?
+  guarantorPhone  String?
+  guarantorNid    String?
+  guarantorRelation String?
+  status          CandidateStatus         @default(APPLIED)
+  verifications   CandidateVerification[]
+  admitCards      AdmitCard[]
+  examResults     ExamResult[]
+  vivaScores      VivaScore[]
+  deployment      DeploymentRecord?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  @@index([trackingId])
+  @@index([status])
+  @@map("candidates")
+}
+
+model CandidateVerification {
+  id          String    @id @default(uuid())
+  candidateId String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  verifiedBy  String    // Staff ID or Name
+  isApproved  Boolean   @default(true)
+  remarks     String?
+  timestamp   DateTime  @default(now())
+
+  @@map("candidate_verifications")
+}
+
+model ExamHall {
+  id             String         @id @default(uuid())
+  hallName       String         @unique // e.g. "Hall A - Central Auditorium"
+  centerLocation String         // e.g. "Dhaka College Complex, Mirpur Road"
+  roomNumber     String?
+  capacity       Int            @default(50)
+  examSchedules  ExamSchedule[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@map("exam_halls")
+}
+
+enum ExamType {
+  PRELIMINARY_MCQ
+  WRITTEN
+  PRACTICAL
+}
+
+model ExamSchedule {
+  id         String       @id @default(uuid())
+  circularId String
+  circular   JobCircular  @relation(fields: [circularId], references: [id], onDelete: Cascade)
+  examType   ExamType     @default(WRITTEN)
+  examDate   DateTime
+  startTime  String       // "10:00 AM"
+  endTime    String       // "12:00 PM"
+  hallId     String
+  hall       ExamHall     @relation(fields: [hallId], references: [id], onDelete: Cascade)
+  totalMarks Decimal      @default(100.0) @db.Decimal(5, 2)
+  passMarks  Decimal      @default(50.0) @db.Decimal(5, 2)
+  admitCards AdmitCard[]
+  results    ExamResult[]
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@map("exam_schedules")
+}
+
+model AdmitCard {
+  id             String       @id @default(uuid())
+  admitCardNo    String       @unique // e.g. ADM-2026-00041
+  candidateId    String
+  candidate      Candidate    @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  examScheduleId String
+  examSchedule   ExamSchedule @relation(fields: [examScheduleId], references: [id], onDelete: Cascade)
+  rollNumber     String       @unique // e.g. 100041
+  seatNumber     String?
+  qrCodePayload  String?
+  isPrinted      Boolean      @default(false)
+  issuedAt       DateTime     @default(now())
+
+  @@map("admit_cards")
+}
+
+model ExamResult {
+  id             String       @id @default(uuid())
+  candidateId    String
+  candidate      Candidate    @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  examScheduleId String
+  examSchedule   ExamSchedule @relation(fields: [examScheduleId], references: [id], onDelete: Cascade)
+  marksObtained  Decimal      @db.Decimal(5, 2)
+  isPassed       Boolean      @default(false)
+  meritRank      Int?
+  publishedAt    DateTime     @default(now())
+
+  @@unique([candidateId, examScheduleId])
+  @@map("exam_results")
+}
+
+model VivaBoard {
+  id            String            @id @default(uuid())
+  boardName     String            // e.g. "Viva Board 1 - Field Officers Selection"
+  circularId    String
+  circular      JobCircular       @relation(fields: [circularId], references: [id], onDelete: Cascade)
+  vivaDate      DateTime
+  venue         String            // e.g. "Board Room 3, UDDIPAN Head Office"
+  members       VivaBoardMember[]
+  scores        VivaScore[]
+  isPublished   Boolean           @default(false)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@map("viva_boards")
+}
+
+model VivaBoardMember {
+  id          String    @id @default(uuid())
+  vivaBoardId String
+  vivaBoard   VivaBoard @relation(fields: [vivaBoardId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        String    @default("Interviewer") // e.g. "Board Chairman", "Technical Expert", "HR Member"
+
+  @@unique([vivaBoardId, userId])
+  @@map("viva_board_members")
+}
+
+model VivaScore {
+  id                 String    @id @default(uuid())
+  vivaBoardId        String
+  vivaBoard          VivaBoard @relation(fields: [vivaBoardId], references: [id], onDelete: Cascade)
+  candidateId        String
+  candidate          Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  memberId           String
+  member             User      @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  appearanceScore    Decimal   @default(0.0) @db.Decimal(4, 2) // Max 10
+  technicalScore     Decimal   @default(0.0) @db.Decimal(4, 2) // Max 20
+  communicationScore Decimal   @default(0.0) @db.Decimal(4, 2) // Max 10
+  totalScore         Decimal   @db.Decimal(5, 2)               // Max 40
+  remarks            String?
+  timestamp          DateTime  @default(now())
+
+  @@unique([vivaBoardId, candidateId, memberId])
+  @@map("viva_scores")
+}
+
+model DeploymentRecord {
+  id                    String      @id @default(uuid())
+  candidateId           String      @unique
+  candidate             Candidate   @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  trackingId            String      @unique
+  branchId              String
+  branch                Branch      @relation(fields: [branchId], references: [id])
+  departmentId          String
+  department            Department  @relation(fields: [departmentId], references: [id])
+  designationId         String
+  designation           Designation @relation(fields: [designationId], references: [id])
+  joiningDeadline       DateTime
+  deploymentLetterNo    String      @unique // e.g. DEP-2026-00041
+  deploymentLetterText  String      @db.Text
+  isConvertedToEmployee Boolean     @default(false)
+  convertedEmployeeId   String?     @unique
+  convertedEmployee     User?       @relation("DeployedEmployee", fields: [convertedEmployeeId], references: [id], onDelete: SetNull)
+  convertedAt           DateTime?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  @@map("deployment_records")
+}
+
+enum RequisitionStatus {
+  DRAFT
+  PENDING_HR
+  APPROVED_HR
+  APPROVED_MANAGEMENT
+  REJECTED
+  CANCELLED
+}
+
+model ManpowerRequisition {
+  id               String            @id @default(uuid())
+  requisitionNo    String            @unique // e.g. REQ-2026-0001
+  departmentId     String
+  department       Department        @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  designationId    String
+  designation      Designation       @relation(fields: [designationId], references: [id], onDelete: Cascade)
+  branchId         String?
+  branch           Branch?           @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  vacanciesCount   Int               @default(1)
+  justification    String            @db.Text
+  expectedJoinDate DateTime?
+  budgetApproved   Boolean           @default(false)
+  status           RequisitionStatus @default(PENDING_HR)
+  initiatedById    String
+  initiatedBy      User              @relation("InitiatedRequisitions", fields: [initiatedById], references: [id], onDelete: Cascade)
+  approvedById     String?
+  approvedBy       User?             @relation("ApprovedRequisitions", fields: [approvedById], references: [id], onDelete: SetNull)
+  rejectionReason  String?
+  circulars        JobCircular[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@map("manpower_requisitions")
+}

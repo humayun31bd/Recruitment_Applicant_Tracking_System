@@ -1,0 +1,147 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import { prisma } from '@/lib/prisma';
+import { extractBearerToken, verifyAccessToken } from '@/lib/auth';
+
+const updateZoneSchema = z.object({
+  code: z.string().min(2).toUpperCase().optional(),
+  name: z.string().min(3).optional(),
+  companyId: z.string().uuid().optional(),
+});
+
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> | { id: string } }
+) {
+  try {
+    const { id } = await Promise.resolve(params);
+    const zone = await prisma.zone.findUnique({
+      where: { id },
+      include: {
+        company: true,
+        branches: true,
+        regions: true,
+        _count: { select: { branches: true, regions: true, users: true } },
+      },
+    });
+
+    if (!zone) {
+      return NextResponse.json({ success: false, message: 'Zone not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({ success: true, data: zone });
+  } catch (error: any) {
+    return NextResponse.json(
+      { success: false, message: 'Failed to retrieve zone', detail: error.message },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> | { id: string } }
+) {
+  try {
+    const authHeader = req.headers.get('authorization');
+    const token = extractBearerToken(authHeader);
+    const payload = token ? verifyAccessToken(token) : null;
+    if (!payload && process.env.NODE_ENV === 'production') {
+      return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { id } = await Promise.resolve(params);
+    const body = await req.json();
+    const parsed = updateZoneSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, errors: parsed.error.flatten().fieldErrors },
+        { status: 400 }
+      );
+    }
+
+    const existing = await prisma.zone.findUnique({ where: { id } });
+    if (!existing) {
+      return NextResponse.json({ success: false, message: 'Zone not found' }, { status: 404 });
+    }
+
+    const updated = await prisma.zone.update({
+      where: { id },
+      data: {
+        ...(parsed.data.code ? { code: parsed.data.code } : {}),
+        ...(parsed.data.name ? { name: parsed.data.name } : {}),
+        ...(parsed.data.companyId ? { companyId: parsed.data.companyId } : {}),
+      },
+      include: {
+        company: true,
+        _count: { select: { branches: true, regions: true } },
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: 'Zone updated successfully',
+      data: updated,
+    });
+  } catch (error: any) {
+    if (error.code === 'P2002') {
+      return NextResponse.json(
+        { success: false, message: 'A zone with this code already exists. Please choose a different code.' },
+        { status: 400 }
+      );
+    }
+    return NextResponse.json(
+      { success: false, message: error.message || 'Failed to update zone' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> | { id: string } }
+) {
+  try {
+    const authHeader = req.headers.get('authorization');
+    const token = extractBearerToken(authHeader);
+    const payload = token ? verifyAccessToken(token) : null;
+    if (!payload && process.env.NODE_ENV === 'production') {
+      return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { id } = await Promise.resolve(params);
+    const zone = await prisma.zone.findUnique({
+      where: { id },
+      include: {
+        _count: { select: { branches: true, regions: true, users: true } },
+      },
+    });
+
+    if (!zone) {
+      return NextResponse.json({ success: false, message: 'Zone not found' }, { status: 404 });
+    }
+
+    if (zone._count.branches > 0 || zone._count.regions > 0 || zone._count.users > 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: `Cannot delete zone "${zone.name}" because it contains ${zone._count.branches} branches, ${zone._count.regions} regions, or active employees. Please reassign them first.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    await prisma.zone.delete({ where: { id } });
+
+    return NextResponse.json({
+      success: true,
+      message: `Zone "${zone.name}" deleted successfully.`,
+    });
+  } catch (error: any) {
+    return NextResponse.json(
+      { success: false, message: error.message || 'Failed to delete zone' },
+      { status: 500 }
+    );
+  }
+}

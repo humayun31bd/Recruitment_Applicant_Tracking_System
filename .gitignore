@@ -1,0 +1,46 @@
+﻿# Environment & Secrets (CRITICAL)
+.env
+.env.*
+*.env
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+!.env.example
+
+# Client Confidential Docs & Images
+Docs/
+*/Docs/
+**/Docs/
+
+# Dependencies
+node_modules/
+*/node_modules/
+**/node_modules/
+
+# Build outputs
+.next/
+*/.next/
+**/.next/
+dist/
+*/dist/
+**/dist/
+.angular/
+*/.angular/
+**/.angular/
+out/
+build/
+*.tsbuildinfo
+
+# Uploads & Private Storage
+storage/
+*/storage/
+**/storage/
+uploads/
+*/uploads/
+**/uploads/
+
+# OS & Logs
+*.log
+.DS_Store
+Thumbs.db
